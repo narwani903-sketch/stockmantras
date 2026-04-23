@@ -41,22 +41,10 @@ def get_price(symbol):
     except:
         return pd.DataFrame()
 
-# ----------------------------
-# 📡 FAST INFO (NO CACHE ❗)
-# ----------------------------
-def get_fast(symbol):
-    try:
-        time.sleep(1)
-        data = yf.Ticker(symbol).fast_info
-        return dict(data) if data else {}
-    except:
-        return {}
-
 price = get_price(symbol)
-fast = get_fast(symbol)
 
 # ----------------------------
-# 🧠 LOAD FINANCIALS (BUTTON)
+# 📡 LOAD FINANCIALS (BUTTON)
 # ----------------------------
 fin, bal = None, None
 
@@ -70,23 +58,23 @@ if st.button("📄 Load Financials"):
         st.warning("⚠️ Rate limit hit. Try again later.")
 
 # ----------------------------
-# 🧠 SAFE EXTRACT
+# 🧠 SAFE EXTRACT FUNCTION
 # ----------------------------
-def safe(df, key):
+def get_val(df, key):
     try:
         return float(df.loc[key].iloc[0])
     except:
         return None
 
-net_income = safe(fin, "Net Income") if fin is not None else None
-revenue = safe(fin, "Total Revenue") if fin is not None else None
-equity = safe(bal, "Total Stockholder Equity") if bal is not None else None
-assets = safe(bal, "Total Assets") if bal is not None else None
-
-price_val = fast.get("lastPrice", None)
+# Extract values
+net_income = get_val(fin, "Net Income") if fin is not None else None
+revenue = get_val(fin, "Total Revenue") if fin is not None else None
+equity = get_val(bal, "Total Stockholder Equity") if bal is not None else None
+debt = get_val(bal, "Total Debt") if bal is not None else 0
+assets = get_val(bal, "Total Assets") if bal is not None else None
 
 # ----------------------------
-# 📊 CALCULATIONS
+# 📊 RATIOS (PROPER CALCULATION)
 # ----------------------------
 def calc_roe():
     if net_income and equity:
@@ -94,9 +82,11 @@ def calc_roe():
     return "N/A"
 
 def calc_roce():
-    if net_income and assets:
-        return round((net_income / assets) * 100, 2)
-    return "N/A"
+    try:
+        capital_employed = equity + debt
+        return round((net_income / capital_employed) * 100, 2)
+    except:
+        return "N/A"
 
 def calc_margin():
     if net_income and revenue:
@@ -104,19 +94,24 @@ def calc_margin():
     return "N/A"
 
 def calc_pe():
-    if net_income and price_val:
-        return round(price_val / (net_income / 1e7), 2)
-    return "N/A"
+    try:
+        latest_price = price["Close"].iloc[-1]
+        shares_est = equity / latest_price if equity else None
+        eps = net_income / shares_est if shares_est else None
+        return round(latest_price / eps, 2) if eps else "N/A"
+    except:
+        return "N/A"
 
 # ----------------------------
 # 🏢 BASIC INFO
 # ----------------------------
 st.header(company)
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Price", price_val if price_val else "N/A")
-col2.metric("Market Cap", fast.get("marketCap", "N/A"))
-col3.metric("Listing Date", listing_date)
+latest_price = price["Close"].iloc[-1] if not price.empty else "N/A"
+
+col1, col2 = st.columns(2)
+col1.metric("Price", latest_price)
+col2.metric("Listing Date", listing_date)
 
 # ----------------------------
 # 📈 CHART
@@ -126,11 +121,9 @@ st.subheader("📈 Price Chart")
 if not price.empty:
     fig = px.line(price, x=price.index, y="Close")
     st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("Chart not available")
 
 # ----------------------------
-# 📊 RATIOS
+# 📊 RATIOS DISPLAY
 # ----------------------------
 st.subheader("📊 Fundamental Ratios")
 
@@ -165,25 +158,20 @@ else:
     st.info("Click 'Load Financials' to view data")
 
 # ----------------------------
-# ⚔️ COMPARISON
+# ⚔️ COMPARISON (BASIC SAFE)
 # ----------------------------
 st.sidebar.subheader("Compare")
 
 comp = st.sidebar.selectbox("Second Company", df["Name"])
 comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
 
-fast2 = get_fast(comp_symbol)
+price2 = get_price(comp_symbol)
+price2_val = price2["Close"].iloc[-1] if not price2.empty else "N/A"
 
 comp_df = pd.DataFrame({
-    "Metric": ["Price", "Market Cap"],
-    company: [
-        price_val,
-        fast.get("marketCap", "N/A")
-    ],
-    comp: [
-        fast2.get("lastPrice", "N/A"),
-        fast2.get("marketCap", "N/A")
-    ]
+    "Metric": ["Price"],
+    company: [latest_price],
+    comp: [price2_val]
 })
 
 st.subheader("⚔️ Comparison")
