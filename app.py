@@ -57,6 +57,12 @@ def get_fast_info(symbol):
     except:
         return {}
 
+def get_full_info(symbol):
+    try:
+        return yf.Ticker(symbol).info
+    except:
+        return {}
+
 def get_financials(symbol):
     stock = yf.Ticker(symbol)
     try:
@@ -68,7 +74,8 @@ def get_financials(symbol):
 # 📊 FETCH DATA
 # ----------------------------
 price = get_price(symbol)
-info = get_fast_info(symbol)
+fast = get_fast_info(symbol)
+full = get_full_info(symbol)
 fin, bal, cf = get_financials(symbol)
 
 # ----------------------------
@@ -78,9 +85,9 @@ st.header(company)
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Price", info.get("lastPrice", "N/A"))
-col2.metric("Market Cap", info.get("marketCap", "N/A"))
-col3.metric("Volume", info.get("lastVolume", "N/A"))
+col1.metric("Price", fast.get("lastPrice", "N/A"))
+col2.metric("Market Cap", fast.get("marketCap", "N/A"))
+col3.metric("Volume", fast.get("lastVolume", "N/A"))
 col4.metric("Listing Date", listing_date)
 
 # ----------------------------
@@ -100,11 +107,11 @@ else:
 st.subheader("📊 Key Ratios")
 
 ratios = {
-    "PE Ratio": info.get("trailingPE", "N/A"),
-    "ROE": info.get("returnOnEquity", "N/A"),
-    "Profit Margin": info.get("profitMargins", "N/A"),
-    "Operating Margin": info.get("operatingMargins", "N/A"),
-    "Revenue Growth": info.get("revenueGrowth", "N/A")
+    "PE Ratio": full.get("trailingPE", "N/A"),
+    "ROE": full.get("returnOnEquity", "N/A"),
+    "Profit Margin": full.get("profitMargins", "N/A"),
+    "Operating Margin": full.get("operatingMargins", "N/A"),
+    "Revenue Growth": full.get("revenueGrowth", "N/A")
 }
 
 st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
@@ -116,8 +123,10 @@ st.subheader("📄 Financial Statements (₹ in Millions)")
 
 def convert_to_millions(df):
     if df is not None and not df.empty:
+        df = df.copy()
+        df = df.apply(pd.to_numeric, errors='coerce')
         return (df / 1_000_000).round(2)
-    return df
+    return pd.DataFrame()
 
 tab1, tab2, tab3 = st.tabs(["Income", "Balance Sheet", "Cashflow"])
 
@@ -131,7 +140,7 @@ with tab3:
     st.dataframe(convert_to_millions(cf))
 
 # ----------------------------
-# 🏦 SHAREHOLDING
+# 🏦 SHAREHOLDING (DEMO)
 # ----------------------------
 st.subheader("🏦 Shareholding Pattern")
 
@@ -151,21 +160,22 @@ st.sidebar.subheader("Compare")
 comp = st.sidebar.selectbox("Second Company", df["Name"])
 comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
 
-info2 = get_fast_info(comp_symbol)
+fast2 = get_fast_info(comp_symbol)
+full2 = get_full_info(comp_symbol)
 
-def get_ratios(i):
+def get_ratios(fast, full):
     return {
-        "Price": i.get("lastPrice", "N/A"),
-        "Market Cap": i.get("marketCap", "N/A"),
-        "PE Ratio": i.get("trailingPE", "N/A"),
-        "ROE": i.get("returnOnEquity", "N/A"),
-        "Profit Margin": i.get("profitMargins", "N/A"),
-        "Operating Margin": i.get("operatingMargins", "N/A"),
-        "Revenue Growth": i.get("revenueGrowth", "N/A")
+        "Price": fast.get("lastPrice", "N/A"),
+        "Market Cap": fast.get("marketCap", "N/A"),
+        "PE Ratio": full.get("trailingPE", "N/A"),
+        "ROE": full.get("returnOnEquity", "N/A"),
+        "Profit Margin": full.get("profitMargins", "N/A"),
+        "Operating Margin": full.get("operatingMargins", "N/A"),
+        "Revenue Growth": full.get("revenueGrowth", "N/A")
     }
 
-r1 = get_ratios(info)
-r2 = get_ratios(info2)
+r1 = get_ratios(fast, full)
+r2 = get_ratios(fast2, full2)
 
 comp_df = pd.DataFrame({
     "Metric": list(r1.keys()),
