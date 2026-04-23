@@ -1,4 +1,4 @@
 streamlit
-matplotlib
-openpyxl
+yfinance
+pandas
 plotly
