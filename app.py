@@ -44,7 +44,6 @@ listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 # 📡 DATA FUNCTIONS
 # ----------------------------
 
-# ✅ Cache ONLY price
 @st.cache_data(ttl=300)
 def get_price(symbol):
     try:
@@ -52,14 +51,12 @@ def get_price(symbol):
     except:
         return pd.DataFrame()
 
-# ❌ NO CACHE HERE
 def get_fast_info(symbol):
     try:
         return yf.Ticker(symbol).fast_info
     except:
         return {}
 
-# ❌ NO CACHE HERE
 def get_financials(symbol):
     stock = yf.Ticker(symbol)
     try:
@@ -87,7 +84,7 @@ col3.metric("Volume", info.get("lastVolume", "N/A"))
 col4.metric("Listing Date", listing_date)
 
 # ----------------------------
-# 📈 CHART
+# 📈 PRICE CHART
 # ----------------------------
 st.subheader("📈 Price Chart")
 
@@ -98,33 +95,40 @@ else:
     st.warning("Chart not available")
 
 # ----------------------------
-# 📊 RATIOS
+# 📊 KEY RATIOS
 # ----------------------------
-st.subheader("📊 Key Info")
+st.subheader("📊 Key Ratios")
 
 ratios = {
-    "Day High": info.get("dayHigh", "N/A"),
-    "Day Low": info.get("dayLow", "N/A"),
-    "Previous Close": info.get("previousClose", "N/A")
+    "PE Ratio": info.get("trailingPE", "N/A"),
+    "ROE": info.get("returnOnEquity", "N/A"),
+    "Profit Margin": info.get("profitMargins", "N/A"),
+    "Operating Margin": info.get("operatingMargins", "N/A"),
+    "Revenue Growth": info.get("revenueGrowth", "N/A")
 }
 
 st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
 
 # ----------------------------
-# 📄 FINANCIALS
+# 📄 FINANCIALS (IN MILLIONS)
 # ----------------------------
-st.subheader("📄 Financial Statements")
+st.subheader("📄 Financial Statements (₹ in Millions)")
+
+def convert_to_millions(df):
+    if df is not None and not df.empty:
+        return (df / 1_000_000).round(2)
+    return df
 
 tab1, tab2, tab3 = st.tabs(["Income", "Balance Sheet", "Cashflow"])
 
 with tab1:
-    st.dataframe(fin if fin is not None else pd.DataFrame())
+    st.dataframe(convert_to_millions(fin))
 
 with tab2:
-    st.dataframe(bal if bal is not None else pd.DataFrame())
+    st.dataframe(convert_to_millions(bal))
 
 with tab3:
-    st.dataframe(cf if cf is not None else pd.DataFrame())
+    st.dataframe(convert_to_millions(cf))
 
 # ----------------------------
 # 🏦 SHAREHOLDING
@@ -140,7 +144,7 @@ fig2 = px.pie(holding, names="Category", values="Holding %")
 st.plotly_chart(fig2)
 
 # ----------------------------
-# ⚔️ COMPARISON
+# ⚔️ ADVANCED COMPARISON
 # ----------------------------
 st.sidebar.subheader("Compare")
 
@@ -149,19 +153,25 @@ comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
 
 info2 = get_fast_info(comp_symbol)
 
+def get_ratios(i):
+    return {
+        "Price": i.get("lastPrice", "N/A"),
+        "Market Cap": i.get("marketCap", "N/A"),
+        "PE Ratio": i.get("trailingPE", "N/A"),
+        "ROE": i.get("returnOnEquity", "N/A"),
+        "Profit Margin": i.get("profitMargins", "N/A"),
+        "Operating Margin": i.get("operatingMargins", "N/A"),
+        "Revenue Growth": i.get("revenueGrowth", "N/A")
+    }
+
+r1 = get_ratios(info)
+r2 = get_ratios(info2)
+
 comp_df = pd.DataFrame({
-    "Metric": ["Price", "Market Cap", "Volume"],
-    company: [
-        info.get("lastPrice", "N/A"),
-        info.get("marketCap", "N/A"),
-        info.get("lastVolume", "N/A")
-    ],
-    comp: [
-        info2.get("lastPrice", "N/A"),
-        info2.get("marketCap", "N/A"),
-        info2.get("lastVolume", "N/A")
-    ]
+    "Metric": list(r1.keys()),
+    company: list(r1.values()),
+    comp: list(r2.values())
 })
 
-st.subheader("⚔️ Comparison")
-st.table(comp_df)
+st.subheader("⚔️ Fundamental Comparison")
+st.dataframe(comp_df)
