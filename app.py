@@ -31,7 +31,7 @@ symbol = df[df["Name"] == company]["Symbol"].values[0]
 listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 
 # ----------------------------
-# 📡 SAFE PRICE (CACHED)
+# 📡 PRICE (SAFE CACHE)
 # ----------------------------
 @st.cache_data(ttl=600)
 def get_price(symbol):
@@ -42,13 +42,13 @@ def get_price(symbol):
         return pd.DataFrame()
 
 # ----------------------------
-# 📡 FAST INFO (LIGHT)
+# 📡 FAST INFO (NO CACHE ❗)
 # ----------------------------
-@st.cache_data(ttl=600)
 def get_fast(symbol):
     try:
         time.sleep(1)
-        return yf.Ticker(symbol).fast_info
+        data = yf.Ticker(symbol).fast_info
+        return dict(data) if data else {}
     except:
         return {}
 
@@ -56,7 +56,7 @@ price = get_price(symbol)
 fast = get_fast(symbol)
 
 # ----------------------------
-# 🧠 LOAD FINANCIALS (ON DEMAND)
+# 🧠 LOAD FINANCIALS (BUTTON)
 # ----------------------------
 fin, bal = None, None
 
