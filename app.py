@@ -31,7 +31,7 @@ symbol = df[df["Name"] == company]["Symbol"].values[0]
 listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 
 # ----------------------------
-# 📡 PRICE
+# 📡 PRICE (CACHED)
 # ----------------------------
 @st.cache_data(ttl=600)
 def get_price(symbol):
@@ -44,17 +44,16 @@ def get_price(symbol):
 price = get_price(symbol)
 
 # ----------------------------
-# 📡 FUNDAMENTAL DATA (SAFE)
+# 📡 RATIOS (FROM YFINANCE)
 # ----------------------------
 def get_ratios(symbol):
     try:
         stock = yf.Ticker(symbol)
         info = stock.info
-
         return {
             "PE": info.get("trailingPE"),
             "ROE": info.get("returnOnEquity"),
-            "ROCE": info.get("returnOnAssets"),  # closest proxy
+            "ROCE": info.get("returnOnAssets")  # proxy
         }
     except:
         return {"PE": None, "ROE": None, "ROCE": None}
@@ -62,17 +61,32 @@ def get_ratios(symbol):
 rat = get_ratios(symbol)
 
 # ----------------------------
-# 🧠 FALLBACK (IF DATA MISSING)
+# 🧠 FALLBACK VALUES
 # ----------------------------
 def fallback():
-    return {
-        "PE": 20,
-        "ROE": 15,
-        "ROCE": 18
-    }
+    return {"PE": 20, "ROE": 0.15, "ROCE": 0.18}
 
 if rat["PE"] is None:
     rat = fallback()
+
+# ----------------------------
+# 🧠 SAFE FORMAT FUNCTIONS
+# ----------------------------
+def safe_percent(val):
+    try:
+        if val is None:
+            return "N/A"
+        return round(val * 100, 2)
+    except:
+        return "N/A"
+
+def safe_number(val):
+    try:
+        if val is None:
+            return "N/A"
+        return round(val, 2)
+    except:
+        return "N/A"
 
 # ----------------------------
 # 🏢 BASIC INFO
@@ -80,30 +94,32 @@ if rat["PE"] is None:
 st.header(company)
 
 latest_price = price["Close"].iloc[-1] if not price.empty else 0
-latest_price = round(latest_price)  # ✅ absolute (no fraction)
+latest_price = round(latest_price)  # absolute value
 
 col1, col2 = st.columns(2)
 col1.metric("Price", latest_price)
 col2.metric("Listing Date", listing_date)
 
 # ----------------------------
-# 📈 CHART
+# 📈 PRICE CHART
 # ----------------------------
 st.subheader("📈 Price Chart")
 
 if not price.empty:
     fig = px.line(price, x=price.index, y="Close")
     st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("No price data available")
 
 # ----------------------------
-# 📊 RATIOS
+# 📊 RATIOS DISPLAY
 # ----------------------------
 st.subheader("📊 Fundamental Ratios")
 
 ratios = {
-    "PE Ratio": round(rat["PE"], 2) if rat["PE"] else rat["PE"],
-    "ROE (%)": round(rat["ROE"] * 100, 2) if rat["ROE"] else rat["ROE"],
-    "ROCE (%)": round(rat["ROCE"] * 100, 2) if rat["ROCE"] else rat["ROCE"]
+    "PE Ratio": safe_number(rat.get("PE")),
+    "ROE (%)": safe_percent(rat.get("ROE")),
+    "ROCE (%)": safe_percent(rat.get("ROCE"))
 }
 
 st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
@@ -117,25 +133,26 @@ comp = st.sidebar.selectbox("Second Company", df["Name"])
 comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
 
 price2 = get_price(comp_symbol)
-price2_val = round(price2["Close"].iloc[-1]) if not price2.empty else 0
+price2_val = price2["Close"].iloc[-1] if not price2.empty else 0
+price2_val = round(price2_val)
 
 rat2 = get_ratios(comp_symbol)
 if rat2["PE"] is None:
     rat2 = fallback()
 
 comp_df = pd.DataFrame({
-    "Metric": ["Price", "PE", "ROE (%)", "ROCE (%)"],
+    "Metric": ["Price", "PE Ratio", "ROE (%)", "ROCE (%)"],
     company: [
         latest_price,
-        round(rat["PE"], 2),
-        round(rat["ROE"] * 100, 2),
-        round(rat["ROCE"] * 100, 2)
+        safe_number(rat.get("PE")),
+        safe_percent(rat.get("ROE")),
+        safe_percent(rat.get("ROCE"))
     ],
     comp: [
         price2_val,
-        round(rat2["PE"], 2),
-        round(rat2["ROE"] * 100, 2),
-        round(rat2["ROCE"] * 100, 2)
+        safe_number(rat2.get("PE")),
+        safe_percent(rat2.get("ROE")),
+        safe_percent(rat2.get("ROCE"))
     ]
 })
 
