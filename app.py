@@ -156,3 +156,8 @@ comp_df = pd.DataFrame({
 
 st.subheader("⚔️ Comparison")
 st.table(comp_df)
+
+import sys
+import streamlit as st
+
+st.write(sys.executable)
