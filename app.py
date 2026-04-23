@@ -2,21 +2,33 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
+import os
 
 st.set_page_config(layout="wide")
 st.title("📊 StockMantra - Fundamental Analyzer")
 
 # ----------------------------
-# 📂 COMPANY LIST
+# 📂 LOAD COMPANY LIST (SAFE)
 # ----------------------------
 @st.cache_data
 def load_companies():
-    return pd.read_csv("companies.csv")
+    if os.path.exists("companies.csv"):
+        return pd.read_csv("companies.csv")
+    else:
+        data = {
+            "Symbol": ["RELIANCE.NS", "TCS.NS"],
+            "Name": ["Reliance Industries", "TCS"],
+            "ListingDate": ["1977-11-08", "2004-08-25"]
+        }
+        return pd.DataFrame(data)
 
 df = load_companies()
 
-# Sidebar
+# ----------------------------
+# 🔍 SIDEBAR SEARCH
+# ----------------------------
 st.sidebar.header("🔍 Select Company")
+
 search = st.sidebar.text_input("Search")
 
 if search:
@@ -25,36 +37,43 @@ else:
     df_filtered = df
 
 company = st.sidebar.selectbox("Company", df_filtered["Name"])
+
 symbol = df[df["Name"] == company]["Symbol"].values[0]
 listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 
 # ----------------------------
-# 📡 SAFE DATA FETCHING
+# 📡 DATA FUNCTIONS (SAFE)
 # ----------------------------
+
+# ✅ Cache only simple data
 @st.cache_data(ttl=300)
-def get_data(symbol):
+def get_price(symbol):
+    try:
+        return yf.Ticker(symbol).history(period="1y")
+    except:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def get_fast_info(symbol):
+    try:
+        return yf.Ticker(symbol).fast_info
+    except:
+        return {}
+
+# ❌ No cache for financials
+def get_financials(symbol):
     stock = yf.Ticker(symbol)
-
     try:
-        price = stock.history(period="1y")
+        return stock.financials, stock.balance_sheet, stock.cashflow
     except:
-        price = pd.DataFrame()
+        return None, None, None
 
-    try:
-        fast = stock.fast_info
-    except:
-        fast = {}
-
-    try:
-        financials = stock.financials
-        balance = stock.balance_sheet
-        cashflow = stock.cashflow
-    except:
-        financials, balance, cashflow = None, None, None
-
-    return price, fast, financials, balance, cashflow
-
-price, info, fin, bal, cf = get_data(symbol)
+# ----------------------------
+# 📊 FETCH DATA
+# ----------------------------
+price = get_price(symbol)
+info = get_fast_info(symbol)
+fin, bal, cf = get_financials(symbol)
 
 # ----------------------------
 # 🏢 BASIC INFO
@@ -85,15 +104,15 @@ else:
 st.subheader("📊 Key Ratios")
 
 ratios = {
-    "PE Ratio": info.get("trailingPE", "N/A"),
     "Day High": info.get("dayHigh", "N/A"),
-    "Day Low": info.get("dayLow", "N/A")
+    "Day Low": info.get("dayLow", "N/A"),
+    "Previous Close": info.get("previousClose", "N/A")
 }
 
 st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
 
 # ----------------------------
-# 🧾 FINANCIALS
+# 📄 FINANCIALS
 # ----------------------------
 st.subheader("📄 Financial Statements")
 
@@ -118,7 +137,7 @@ with tab3:
         st.warning("Cashflow not available")
 
 # ----------------------------
-# 🏦 SHAREHOLDING (STATIC DEMO)
+# 🏦 SHAREHOLDING (DEMO)
 # ----------------------------
 st.subheader("🏦 Shareholding Pattern")
 
@@ -136,9 +155,9 @@ st.plotly_chart(fig2)
 st.sidebar.subheader("Compare")
 
 comp = st.sidebar.selectbox("Second Company", df["Name"])
-
 comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
-_, info2, _, _, _ = get_data(comp_symbol)
+
+info2 = get_fast_info(comp_symbol)
 
 comp_df = pd.DataFrame({
     "Metric": ["Price", "Market Cap", "Volume"],
@@ -156,8 +175,3 @@ comp_df = pd.DataFrame({
 
 st.subheader("⚔️ Comparison")
 st.table(comp_df)
-
-import sys
-import streamlit as st
-
-st.write(sys.executable)
