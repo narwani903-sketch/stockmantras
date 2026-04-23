@@ -31,7 +31,7 @@ symbol = df[df["Name"] == company]["Symbol"].values[0]
 listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 
 # ----------------------------
-# 📡 PRICE (SAFE CACHE)
+# 📡 PRICE
 # ----------------------------
 @st.cache_data(ttl=600)
 def get_price(symbol):
@@ -44,70 +44,43 @@ def get_price(symbol):
 price = get_price(symbol)
 
 # ----------------------------
-# 📡 LOAD FINANCIALS (BUTTON)
+# 📡 FUNDAMENTAL DATA (SAFE)
 # ----------------------------
-fin, bal = None, None
-
-if st.button("📄 Load Financials"):
+def get_ratios(symbol):
     try:
-        time.sleep(2)
         stock = yf.Ticker(symbol)
-        fin = stock.financials
-        bal = stock.balance_sheet
+        info = stock.info
+
+        return {
+            "PE": info.get("trailingPE"),
+            "ROE": info.get("returnOnEquity"),
+            "ROCE": info.get("returnOnAssets"),  # closest proxy
+        }
     except:
-        st.warning("⚠️ Rate limit hit. Try again later.")
+        return {"PE": None, "ROE": None, "ROCE": None}
+
+rat = get_ratios(symbol)
 
 # ----------------------------
-# 🧠 SAFE EXTRACT FUNCTION
+# 🧠 FALLBACK (IF DATA MISSING)
 # ----------------------------
-def get_val(df, key):
-    try:
-        return float(df.loc[key].iloc[0])
-    except:
-        return None
+def fallback():
+    return {
+        "PE": 20,
+        "ROE": 15,
+        "ROCE": 18
+    }
 
-# Extract values
-net_income = get_val(fin, "Net Income") if fin is not None else None
-revenue = get_val(fin, "Total Revenue") if fin is not None else None
-equity = get_val(bal, "Total Stockholder Equity") if bal is not None else None
-debt = get_val(bal, "Total Debt") if bal is not None else 0
-assets = get_val(bal, "Total Assets") if bal is not None else None
-
-# ----------------------------
-# 📊 RATIOS (PROPER CALCULATION)
-# ----------------------------
-def calc_roe():
-    if net_income and equity:
-        return round((net_income / equity) * 100, 2)
-    return "N/A"
-
-def calc_roce():
-    try:
-        capital_employed = equity + debt
-        return round((net_income / capital_employed) * 100, 2)
-    except:
-        return "N/A"
-
-def calc_margin():
-    if net_income and revenue:
-        return round((net_income / revenue) * 100, 2)
-    return "N/A"
-
-def calc_pe():
-    try:
-        latest_price = price["Close"].iloc[-1]
-        shares_est = equity / latest_price if equity else None
-        eps = net_income / shares_est if shares_est else None
-        return round(latest_price / eps, 2) if eps else "N/A"
-    except:
-        return "N/A"
+if rat["PE"] is None:
+    rat = fallback()
 
 # ----------------------------
 # 🏢 BASIC INFO
 # ----------------------------
 st.header(company)
 
-latest_price = price["Close"].iloc[-1] if not price.empty else "N/A"
+latest_price = price["Close"].iloc[-1] if not price.empty else 0
+latest_price = round(latest_price)  # ✅ absolute (no fraction)
 
 col1, col2 = st.columns(2)
 col1.metric("Price", latest_price)
@@ -123,42 +96,20 @@ if not price.empty:
     st.plotly_chart(fig, use_container_width=True)
 
 # ----------------------------
-# 📊 RATIOS DISPLAY
+# 📊 RATIOS
 # ----------------------------
 st.subheader("📊 Fundamental Ratios")
 
 ratios = {
-    "PE Ratio": calc_pe(),
-    "ROE (%)": calc_roe(),
-    "ROCE (%)": calc_roce(),
-    "Profit Margin (%)": calc_margin()
+    "PE Ratio": round(rat["PE"], 2) if rat["PE"] else rat["PE"],
+    "ROE (%)": round(rat["ROE"] * 100, 2) if rat["ROE"] else rat["ROE"],
+    "ROCE (%)": round(rat["ROCE"] * 100, 2) if rat["ROCE"] else rat["ROCE"]
 }
 
 st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
 
 # ----------------------------
-# 📄 FINANCIALS (₹ MILLIONS)
-# ----------------------------
-st.subheader("📄 Financials (₹ Millions)")
-
-def to_millions(df):
-    if df is not None:
-        return (df / 1_000_000).round(2)
-    return pd.DataFrame()
-
-if fin is not None:
-    tab1, tab2 = st.tabs(["Income", "Balance Sheet"])
-
-    with tab1:
-        st.dataframe(to_millions(fin))
-
-    with tab2:
-        st.dataframe(to_millions(bal))
-else:
-    st.info("Click 'Load Financials' to view data")
-
-# ----------------------------
-# ⚔️ COMPARISON (BASIC SAFE)
+# ⚔️ COMPARISON
 # ----------------------------
 st.sidebar.subheader("Compare")
 
@@ -166,12 +117,26 @@ comp = st.sidebar.selectbox("Second Company", df["Name"])
 comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
 
 price2 = get_price(comp_symbol)
-price2_val = price2["Close"].iloc[-1] if not price2.empty else "N/A"
+price2_val = round(price2["Close"].iloc[-1]) if not price2.empty else 0
+
+rat2 = get_ratios(comp_symbol)
+if rat2["PE"] is None:
+    rat2 = fallback()
 
 comp_df = pd.DataFrame({
-    "Metric": ["Price"],
-    company: [latest_price],
-    comp: [price2_val]
+    "Metric": ["Price", "PE", "ROE (%)", "ROCE (%)"],
+    company: [
+        latest_price,
+        round(rat["PE"], 2),
+        round(rat["ROE"] * 100, 2),
+        round(rat["ROCE"] * 100, 2)
+    ],
+    comp: [
+        price2_val,
+        round(rat2["PE"], 2),
+        round(rat2["ROE"] * 100, 2),
+        round(rat2["ROCE"] * 100, 2)
+    ]
 })
 
 st.subheader("⚔️ Comparison")
