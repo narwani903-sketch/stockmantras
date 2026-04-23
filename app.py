@@ -1,178 +1,199 @@
 import streamlit as st
 import pandas as pd
-import yfinance as yf
-import plotly.express as px
 import os
-import time
+from tax_logic import TaxCalculator, compare_regimes
+from visualizations import plot_slab_tax, plot_tax_components, plot_regime_comparison, plot_income_tax_trend
+from reports import generate_excel_report, generate_pdf_report
+from ui_components import apply_custom_css, render_metric_card, show_tax_suggestions
 
-st.set_page_config(layout="wide")
-st.title("📊 StockMantra - Fundamental Analyzer")
+# Configuration
+st.set_page_config(page_title="Income Tax Calculator FY 25-26", page_icon="₹", layout="wide")
+apply_custom_css()
 
-# ----------------------------
-# 📂 LOAD COMPANIES
-# ----------------------------
-@st.cache_data
-def load_companies():
-    if os.path.exists("companies.csv"):
-        return pd.read_csv("companies.csv")
-    return pd.DataFrame({
-        "Symbol": ["RELIANCE.NS", "TCS.NS"],
-        "Name": ["Reliance Industries", "TCS"],
-        "ListingDate": ["1977-11-08", "2004-08-25"]
-    })
+# Initialize session state for lead form
+if 'lead_captured' not in st.session_state:
+    st.session_state.lead_captured = False
 
-df = load_companies()
+# Sidebar - Inputs
+st.sidebar.title("₹ Tax Calculator India")
+st.sidebar.markdown("**FY 2025-26 | AY 2026-27**")
 
-# ----------------------------
-# 🔍 SIDEBAR
-# ----------------------------
-company = st.sidebar.selectbox("Select Company", df["Name"])
-symbol = df[df["Name"] == company]["Symbol"].values[0]
-listing_date = df[df["Name"] == company]["ListingDate"].values[0]
+# Regime Selection
+is_new_regime = st.sidebar.radio("Select Tax Regime", ["New Regime (Default)", "Old Regime"]) == "New Regime (Default)"
 
-# ----------------------------
-# 📡 PRICE (SAFE CACHE)
-# ----------------------------
-@st.cache_data(ttl=600)
-def get_price(symbol):
-    try:
-        time.sleep(1)
-        return yf.Ticker(symbol).history(period="1y")
-    except:
-        return pd.DataFrame()
+st.sidebar.markdown("---")
+st.sidebar.markdown("<div class='section-income'><h3>Income Details</h3></div>", unsafe_allow_html=True)
 
-price = get_price(symbol)
+# Income Inputs
+salary = st.sidebar.number_input("Gross Salary", min_value=0, value=0, step=50000, help="Standard deduction will be applied automatically.")
+house_property = st.sidebar.number_input("Income from House Property", value=0, step=10000)
+business = st.sidebar.number_input("Income from Business/Profession", min_value=0, value=0, step=50000)
 
-# ----------------------------
-# 📡 LOAD FINANCIALS (BUTTON)
-# ----------------------------
-fin, bal = None, None
+with st.sidebar.expander("Capital Gains"):
+    ltcg_112a = st.number_input("LTCG (Equity - Sec 112A)", min_value=0, value=0, step=10000, help="Taxed at 12.5% (assuming >1.25L already adjusted or full amount if no exemption applies here)")
+    stcg_111a = st.number_input("STCG (Equity - Sec 111A)", min_value=0, value=0, step=10000, help="Taxed at 20%")
 
-if st.button("📄 Load Financials"):
-    try:
-        time.sleep(2)
-        stock = yf.Ticker(symbol)
-        fin = stock.financials
-        bal = stock.balance_sheet
-    except:
-        st.warning("⚠️ Rate limit hit. Try again later.")
+with st.sidebar.expander("Other Incomes"):
+    other_sources = st.number_input("Income from Other Sources (Interest, etc.)", min_value=0, value=0, step=10000)
+    crypto_lottery = st.number_input("Crypto / Lottery / Winnings", min_value=0, value=0, step=10000, help="Taxed flat at 30%")
+    agri_income = st.number_input("Net Agriculture Income", min_value=0, value=0, step=10000, help="Used for rate purposes (partial integration)")
 
-# ----------------------------
-# 🧠 SAFE EXTRACT FUNCTION
-# ----------------------------
-def get_val(df, key):
-    try:
-        return float(df.loc[key].iloc[0])
-    except:
-        return None
+# Deductions (Only if Old Regime)
+deductions = 0
+if not is_new_regime:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("<div class='section-deductions'><h3>Deductions</h3></div>", unsafe_allow_html=True)
+    deductions = st.sidebar.number_input("Total Chapter VI-A Deductions (80C, 80D, etc.)", min_value=0, value=0, step=10000)
 
-# Extract values
-net_income = get_val(fin, "Net Income") if fin is not None else None
-revenue = get_val(fin, "Total Revenue") if fin is not None else None
-equity = get_val(bal, "Total Stockholder Equity") if bal is not None else None
-debt = get_val(bal, "Total Debt") if bal is not None else 0
-assets = get_val(bal, "Total Assets") if bal is not None else None
-
-# ----------------------------
-# 📊 RATIOS (PROPER CALCULATION)
-# ----------------------------
-def calc_roe():
-    if net_income and equity:
-        return round((net_income / equity) * 100, 2)
-    return "N/A"
-
-def calc_roce():
-    try:
-        capital_employed = equity + debt
-        return round((net_income / capital_employed) * 100, 2)
-    except:
-        return "N/A"
-
-def calc_margin():
-    if net_income and revenue:
-        return round((net_income / revenue) * 100, 2)
-    return "N/A"
-
-def calc_pe():
-    try:
-        latest_price = price["Close"].iloc[-1]
-        shares_est = equity / latest_price if equity else None
-        eps = net_income / shares_est if shares_est else None
-        return round(latest_price / eps, 2) if eps else "N/A"
-    except:
-        return "N/A"
-
-# ----------------------------
-# 🏢 BASIC INFO
-# ----------------------------
-st.header(company)
-
-latest_price = price["Close"].iloc[-1] if not price.empty else "N/A"
-
-col1, col2 = st.columns(2)
-col1.metric("Price", latest_price)
-col2.metric("Listing Date", listing_date)
-
-# ----------------------------
-# 📈 CHART
-# ----------------------------
-st.subheader("📈 Price Chart")
-
-if not price.empty:
-    fig = px.line(price, x=price.index, y="Close")
-    st.plotly_chart(fig, use_container_width=True)
-
-# ----------------------------
-# 📊 RATIOS DISPLAY
-# ----------------------------
-st.subheader("📊 Fundamental Ratios")
-
-ratios = {
-    "PE Ratio": calc_pe(),
-    "ROE (%)": calc_roe(),
-    "ROCE (%)": calc_roce(),
-    "Profit Margin (%)": calc_margin()
+# Build Input Dictionary
+inputs = {
+    'salary': salary,
+    'house_property': house_property,
+    'business': business,
+    'ltcg_112a': ltcg_112a,
+    'stcg_111a': stcg_111a,
+    'other_sources': other_sources,
+    'crypto_lottery': crypto_lottery,
+    'agri_income': agri_income,
+    'deductions': deductions
 }
 
-st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
+# Main Panel
+st.title("Comprehensive Tax Dashboard")
 
-# ----------------------------
-# 📄 FINANCIALS (₹ MILLIONS)
-# ----------------------------
-st.subheader("📄 Financials (₹ Millions)")
+# Lead Generation Form Modal / Area
+if not st.session_state.lead_captured:
+    with st.expander("Unlock Detailed Reports & AI Suggestions", expanded=True):
+        st.write("Please enter your details to generate personalized reports.")
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Full Name")
+            email = st.text_input("Email Address")
+        with col2:
+            phone = st.text_input("Phone Number")
+            city = st.text_input("City")
+            
+        if st.button("Generate Reports"):
+            if name and email:
+                # Save lead
+                lead_data = pd.DataFrame([[name, email, phone, city]], columns=['Name', 'Email', 'Phone', 'City'])
+                file_path = 'leads.csv'
+                if not os.path.exists(file_path):
+                    lead_data.to_csv(file_path, index=False)
+                else:
+                    lead_data.to_csv(file_path, mode='a', header=False, index=False)
+                st.session_state.lead_captured = True
+                st.session_state.user_info = {'name': name, 'email': email}
+                st.rerun()
+            else:
+                st.error("Name and Email are required.")
 
-def to_millions(df):
-    if df is not None:
-        return (df / 1_000_000).round(2)
-    return pd.DataFrame()
+# Perform Calculation
+calc = TaxCalculator(is_new_regime=is_new_regime)
+results = calc.calculate_tax(inputs)
 
-if fin is not None:
-    tab1, tab2 = st.tabs(["Income", "Balance Sheet"])
+# Top Row Metrics
+col1, col2, col3 = st.columns(3)
+with col1:
+    render_metric_card("Gross Total Income", results['total_income'])
+with col2:
+    render_metric_card("Total Tax Liability", results['total_tax_liability'])
+with col3:
+    effective_rate = (results['total_tax_liability'] / results['total_income'] * 100) if results['total_income'] > 0 else 0
+    render_metric_card("Effective Tax Rate", effective_rate, prefix="")
+    st.markdown(f"<div style='text-align: center; color: #6b7280; margin-top: -10px;'>%</div>", unsafe_allow_html=True)
 
-    with tab1:
-        st.dataframe(to_millions(fin))
+st.markdown("---")
 
-    with tab2:
-        st.dataframe(to_millions(bal))
-else:
-    st.info("Click 'Load Financials' to view data")
+# Visualizations Row 1
+col_v1, col_v2 = st.columns(2)
 
-# ----------------------------
-# ⚔️ COMPARISON (BASIC SAFE)
-# ----------------------------
-st.sidebar.subheader("Compare")
+with col_v1:
+    st.subheader("Tax Components")
+    fig_pie = plot_tax_components(results)
+    st.plotly_chart(fig_pie, width='stretch')
+    
+with col_v2:
+    st.subheader("Slab-wise Breakdown")
+    fig_bar = plot_slab_tax(results['breakdown'])
+    st.plotly_chart(fig_bar, width='stretch')
 
-comp = st.sidebar.selectbox("Second Company", df["Name"])
-comp_symbol = df[df["Name"] == comp]["Symbol"].values[0]
+st.markdown("---")
 
-price2 = get_price(comp_symbol)
-price2_val = price2["Close"].iloc[-1] if not price2.empty else "N/A"
+# Old vs New Comparison
+st.subheader("Old vs New Regime Comparison")
+comparison = compare_regimes(inputs)
 
-comp_df = pd.DataFrame({
-    "Metric": ["Price"],
-    company: [latest_price],
-    comp: [price2_val]
-})
+col_c1, col_c2 = st.columns([1, 2])
+with col_c1:
+    st.write("")
+    st.write("")
+    st.metric(label="New Regime Tax", value=f"₹{comparison['New Regime']['total_tax_liability']:,.0f}")
+    st.metric(label="Old Regime Tax", value=f"₹{comparison['Old Regime']['total_tax_liability']:,.0f}")
+    
+    if comparison['Recommendation'] == 'New Regime':
+        st.success(f"**Recommendation:** Go with New Regime and save ₹{comparison['Savings']:,.0f}")
+    elif comparison['Recommendation'] == 'Old Regime':
+        st.info(f"**Recommendation:** Go with Old Regime and save ₹{comparison['Savings']:,.0f}")
+    else:
+        st.warning("Both regimes yield the same tax liability.")
+        
+with col_c2:
+    fig_comp = plot_regime_comparison(comparison['New Regime'], comparison['Old Regime'])
+    st.plotly_chart(fig_comp, width='stretch')
 
-st.subheader("⚔️ Comparison")
-st.dataframe(comp_df)
+# Income vs Tax Simulation
+st.markdown("---")
+st.subheader("Income vs Tax Simulator")
+fig_trend = plot_income_tax_trend(inputs, is_new_regime)
+st.plotly_chart(fig_trend, width='stretch')
+
+# Detailed Breakdown Table
+st.markdown("---")
+st.subheader("Detailed Computation Table")
+df_breakdown = pd.DataFrame([{
+    'Description': 'Total Taxable Income', 'Amount': f"₹{results['total_income']:,.0f}"
+}, {
+    'Description': 'Tax on Normal Rates', 'Amount': f"₹{results['tax_normal']:,.0f}"
+}, {
+    'Description': 'Tax on Special Rates (Capital Gains/Crypto)', 'Amount': f"₹{results['tax_special']:,.0f}"
+}, {
+    'Description': 'Less: Rebate u/s 87A', 'Amount': f"₹{results['rebate']:,.0f}"
+}, {
+    'Description': 'Less: Rebate Marginal Relief', 'Amount': f"₹{results['rebate_marginal_relief']:,.0f}"
+}, {
+    'Description': 'Add: Surcharge', 'Amount': f"₹{results['surcharge']:,.0f}"
+}, {
+    'Description': 'Less: Surcharge Marginal Relief', 'Amount': f"₹{results['surcharge_marginal_relief']:,.0f}"
+}, {
+    'Description': 'Add: Health & Education Cess (4%)', 'Amount': f"₹{results['cess']:,.0f}"
+}, {
+    'Description': 'Total Tax Liability', 'Amount': f"₹{results['total_tax_liability']:,.0f}"
+}])
+st.table(df_breakdown)
+
+# AI Suggestions and Reports
+if st.session_state.lead_captured:
+    st.markdown("---")
+    show_tax_suggestions(results, is_new_regime)
+    
+    st.markdown("### 📥 Download Reports")
+    col_d1, col_d2, col_d3 = st.columns([1,1,2])
+    
+    excel_data = generate_excel_report(inputs, results, is_new_regime)
+    with col_d1:
+        st.download_button(
+            label="📄 Download Excel",
+            data=excel_data,
+            file_name="tax_computation.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+    pdf_data = generate_pdf_report(inputs, results, is_new_regime, st.session_state.user_info)
+    with col_d2:
+        st.download_button(
+            label="📑 Download PDF",
+            data=pdf_data,
+            file_name="tax_report.pdf",
+            mime="application/pdf"
+        )
