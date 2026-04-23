@@ -8,24 +8,23 @@ st.set_page_config(layout="wide")
 st.title("📊 StockMantra - Fundamental Analyzer")
 
 # ----------------------------
-# 📂 LOAD COMPANY LIST (SAFE)
+# 📂 LOAD COMPANY LIST
 # ----------------------------
 @st.cache_data
 def load_companies():
     if os.path.exists("companies.csv"):
         return pd.read_csv("companies.csv")
     else:
-        data = {
+        return pd.DataFrame({
             "Symbol": ["RELIANCE.NS", "TCS.NS"],
             "Name": ["Reliance Industries", "TCS"],
             "ListingDate": ["1977-11-08", "2004-08-25"]
-        }
-        return pd.DataFrame(data)
+        })
 
 df = load_companies()
 
 # ----------------------------
-# 🔍 SIDEBAR SEARCH
+# 🔍 SIDEBAR
 # ----------------------------
 st.sidebar.header("🔍 Select Company")
 
@@ -42,10 +41,10 @@ symbol = df[df["Name"] == company]["Symbol"].values[0]
 listing_date = df[df["Name"] == company]["ListingDate"].values[0]
 
 # ----------------------------
-# 📡 DATA FUNCTIONS (SAFE)
+# 📡 DATA FUNCTIONS
 # ----------------------------
 
-# ✅ Cache only simple data
+# ✅ Cache ONLY price
 @st.cache_data(ttl=300)
 def get_price(symbol):
     try:
@@ -53,14 +52,14 @@ def get_price(symbol):
     except:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+# ❌ NO CACHE HERE
 def get_fast_info(symbol):
     try:
         return yf.Ticker(symbol).fast_info
     except:
         return {}
 
-# ❌ No cache for financials
+# ❌ NO CACHE HERE
 def get_financials(symbol):
     stock = yf.Ticker(symbol)
     try:
@@ -101,7 +100,7 @@ else:
 # ----------------------------
 # 📊 RATIOS
 # ----------------------------
-st.subheader("📊 Key Ratios")
+st.subheader("📊 Key Info")
 
 ratios = {
     "Day High": info.get("dayHigh", "N/A"),
@@ -119,25 +118,16 @@ st.subheader("📄 Financial Statements")
 tab1, tab2, tab3 = st.tabs(["Income", "Balance Sheet", "Cashflow"])
 
 with tab1:
-    if fin is not None:
-        st.dataframe(fin)
-    else:
-        st.warning("Income data not available")
+    st.dataframe(fin if fin is not None else pd.DataFrame())
 
 with tab2:
-    if bal is not None:
-        st.dataframe(bal)
-    else:
-        st.warning("Balance sheet not available")
+    st.dataframe(bal if bal is not None else pd.DataFrame())
 
 with tab3:
-    if cf is not None:
-        st.dataframe(cf)
-    else:
-        st.warning("Cashflow not available")
+    st.dataframe(cf if cf is not None else pd.DataFrame())
 
 # ----------------------------
-# 🏦 SHAREHOLDING (DEMO)
+# 🏦 SHAREHOLDING
 # ----------------------------
 st.subheader("🏦 Shareholding Pattern")
 
